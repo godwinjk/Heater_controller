@@ -1,0 +1,5 @@
+<resources>
+    <string name="app_name">Heater</string>
+    <string name="no_permission">No Permission given</string>
+    <string name="sent_failed">Advertisement failed</string>
+</resources>
