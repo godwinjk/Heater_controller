@@ -33,6 +33,8 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.UUID
+import kotlin.math.abs
+import kotlin.math.sqrt
 
 class TemperatureViewModel(private val application: Application) : AndroidViewModel(application) {
 
@@ -44,6 +46,13 @@ class TemperatureViewModel(private val application: Application) : AndroidViewMo
     // StateFlow to hold current and set temperatures
     private val _currentTemp = MutableStateFlow("0") // Default current temp
     val currentTemp: StateFlow<String> = _currentTemp
+
+    // StateFlow to hold humidity
+    private val _currentHumidity = MutableStateFlow("0") // Default current temp
+    val currentHumidity: StateFlow<String> = _currentHumidity
+
+    private val _feelsLike = MutableStateFlow("0") // Default current temp
+    val feelsLike: StateFlow<String> = _feelsLike
 
     private val _setTemp = MutableStateFlow(0) // Default set temp
     val setTemp: StateFlow<Int> = _setTemp
@@ -165,15 +174,19 @@ class TemperatureViewModel(private val application: Application) : AndroidViewMo
             if (serviceData != null) {
                 // Parse the service data to extract the temperature
                 Log.d("RECEIVED SERVICE DATA", serviceData.toHex())
-                if (serviceData.size >= 3) {
+                if (serviceData.size >= 5) {
                     stopScan()
 
                     val temperature = parseTemperature(serviceData)
                     val bleTemp = parseBleTemp(serviceData)
+                    val humidity = parseHumidity(serviceData)
+
+                    val feelsLike = calculateFeelsLike(temperature, humidity)
 
                     // Print the parsed temperature values
                     Log.d("BLE", "Parsed Temperature: $temperature")
                     Log.d("BLE", "Parsed BLE Temp: $bleTemp")
+                    Log.d("BLE", "Parsed Humidity: $humidity")
 
                     lastFetchTime = System.currentTimeMillis()
 
@@ -183,6 +196,17 @@ class TemperatureViewModel(private val application: Application) : AndroidViewMo
                                 Locale.getDefault(), "%.2f", temperature
                             )
                         )
+                        _currentHumidity.emit(
+                            String.format(
+                                Locale.getDefault(), "%.2f", humidity
+                            )
+                        )
+                        _feelsLike.emit(
+                            String.format(
+                                Locale.getDefault(), "%.2f", feelsLike
+                            )
+                        )
+
                         _setTemp.emit(
                             bleTemp
                         )
@@ -230,6 +254,14 @@ class TemperatureViewModel(private val application: Application) : AndroidViewMo
         return tempToSend / 100.0f
     }
 
+    private fun parseHumidity(tempBytes: ByteArray): Float {
+        // Reconstruct the scaled temperature from the first two bytes
+        val humidity = ((tempBytes[3].toInt() and 0xFF) shl 8) or (tempBytes[4].toInt() and 0xFF)
+
+        // Convert back to float (e.g., 2404 -> 24.04)
+        return humidity / 100.0f
+    }
+
     // Function to extract the BLE temperature (last byte)
     private fun parseBleTemp(tempBytes: ByteArray): Int {
         return tempBytes[2].toInt() and 0xFF
@@ -240,4 +272,36 @@ class TemperatureViewModel(private val application: Application) : AndroidViewMo
         val sdf = SimpleDateFormat("HH:mm", Locale.getDefault())
         return sdf.format(Date(lastFetchTime))
     }
+
+    /**
+     * Calculate "feels like" temperature (Heat Index) in Celsius
+     * based on actual temperature (°C) and relative humidity (%).
+     */
+    fun calculateFeelsLike(tempC: Float, humidity: Float): Float {
+        // Convert Celsius to Fahrenheit
+        val T = (tempC * 9 / 5) + 32
+        val R = humidity
+
+        // NOAA Heat Index formula (in Fahrenheit)
+        var HI = -42.379 +
+                2.04901523 * T +
+                10.14333127 * R +
+                -0.22475541 * T * R +
+                -0.00683783 * T * T +
+                -0.05481717 * R * R +
+                0.00122874 * T * T * R +
+                0.00085282 * T * R * R +
+                -0.00000199 * T * T * R * R
+
+        // Adjustments per NOAA
+        if (R < 13 && T >= 80 && T <= 112) {
+            HI -= ((13 - R) / 4) * sqrt((17 - abs(T - 95)) / 17.0)
+        } else if (R > 85 && T >= 80 && T <= 87) {
+            HI += ((R - 85) / 10) * ((87 - T) / 5)
+        }
+
+        // Convert back to Celsius
+        return ((HI - 32) * 5 / 9).toFloat()
+    }
+
 }

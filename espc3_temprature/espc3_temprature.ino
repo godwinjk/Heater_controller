@@ -9,7 +9,9 @@
 
 Adafruit_AHTX0 aht;
 int bleTemp = 20;
-float currentTemp = 0;      // Store BLE-received temperature
+float currentTemp = 0;      // Sensor temperature
+float currentHumidity = 0;  // Sensor humidity
+float feelsLike = 0;        // Feels like temperature
 bool overrideMode = false;  // Manual override flag
 
 int skipRelay = 0;
@@ -91,11 +93,16 @@ void sendBLETemperature() {
   // Convert float temperature to integer (scaled by 100)
   int tempToSend = (int)(currentTemp * 100);  // e.g., 24.04 -> 2404
 
+  // Convert float humidity to integer (scaled by 100)
+  int humidityToSend = (int)(currentHumidity * 100);  // e.g., 24.04 -> 2404
+
   // Convert tempToSend to 2 bytes (16-bit integer)
-  byte tempBytes[3];
+  byte tempBytes[5];
   tempBytes[0] = tempToSend >> 8;    // Most significant byte (MSB)
   tempBytes[1] = tempToSend & 0xFF;  // Least significant byte (LSB)
   tempBytes[2] = bleTemp;
+  tempBytes[3] = humidityToSend >> 8; //MSB
+  tempBytes[4] = humidityToSend & 0xFF; //LSB
 
   Serial.print("📡 Advertising Temp: ");
   Serial.print(tempToSend);
@@ -104,7 +111,7 @@ void sendBLETemperature() {
   // Create BLE Advertisement Data
   BLEAdvertisementData advData;
   // advData.setCompleteServices(BLEUUID(UUID_PATTERN_ADVERT));                          // Add Service UUID
-  advData.setServiceData(BLEUUID(UUID_PATTERN_ADVERT), String((char*)tempBytes, 3));  // Send temperature as service data (3 bytes)
+  advData.setServiceData(BLEUUID(UUID_PATTERN_ADVERT), String((char*)tempBytes, 5));  // Send temperature as service data (3 bytes)
 
   pAdvertising->setAdvertisementData(advData);
   pAdvertising->setScanResponse(true);
@@ -133,6 +140,27 @@ void stopAdvertising() {
   BLEAdvertising* pAdvertising = BLEDevice::getAdvertising();
   pAdvertising->stop();  // Stop current advertisements before changing
 }
+
+// Calculate "feels like" temperature (Heat Index) in Celsius
+float calculateFeelsLike(float temperatureC, float humidity) {
+  // Convert Celsius to Fahrenheit
+  float T = (temperatureC * 9.0 / 5.0) + 32.0;
+  float R = humidity;
+
+  // NOAA Heat Index formula (in Fahrenheit)
+  float HI = -42.379 + 2.04901523 * T + 10.14333127 * R + -0.22475541 * T * R + -0.00683783 * T * T + -0.05481717 * R * R + 0.00122874 * T * T * R + 0.00085282 * T * R * R + -0.00000199 * T * T * R * R;
+
+  // Adjustment for certain ranges (NOAA guidance)
+  if ((R < 13) && (T >= 80.0) && (T <= 112.0)) {
+    HI -= ((13 - R) / 4) * sqrt((17 - abs(T - 95.0)) / 17);
+  } else if ((R > 85) && (T >= 80.0) && (T <= 87.0)) {
+    HI += ((R - 85) / 10) * ((87 - T) / 5);
+  }
+
+  // Convert back to Celsius
+  return (HI - 32.0) * 5.0 / 9.0;
+}
+
 void setup() {
   Serial.begin(115200);
   Serial.println("Initializing...");
@@ -172,7 +200,10 @@ void loop() {
 
   Serial.print("AHT10 Sensor Temperature: ");
   Serial.println(temp.temperature);
+
   currentTemp = temp.temperature;
+  currentHumidity = humidity.relative_humidity;
+  float feelsLike = calculateFeelsLike(temp.temperature, humidity.relative_humidity);
   if (currentTemp < -40 || currentTemp > 100) {
     Serial.println("⚠️ Invalid temperature reading! Check sensor.");
     blinkLED(LED_PIN, 2, 1000);
@@ -206,10 +237,15 @@ void loop() {
     }
   }
   skipRelay += 1;
-  Serial.print("BLE Temperature: ");
-  Serial.print(bleTemp);
-  Serial.print("| Current temp:");
+  
+
+  Serial.print("Sensor Temp: ");
   Serial.print(currentTemp);
+  Serial.print(" °C | Humidity: ");
+  Serial.print(currentHumidity);
+  Serial.print(" % | Feels Like: ");
+  Serial.print(feelsLike);
+  Serial.print(" °C");
   Serial.print("| Skip:");
   Serial.println(skipRelay);
 }

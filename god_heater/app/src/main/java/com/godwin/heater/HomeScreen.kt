@@ -18,13 +18,17 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.godwin.heater.vm.TemperatureViewModel
 
 @Composable
 fun TemperatureScreen(viewModel: TemperatureViewModel = viewModel()) {
     val currentTemp by viewModel.currentTemp.collectAsState()
+    val feelsLike by viewModel.feelsLike.collectAsState()
+    val currentHumidity by viewModel.currentHumidity.collectAsState()
     val setTemp by viewModel.setTemp.collectAsState()
     val isScanning by viewModel.isScanning.collectAsState()
     val lastUpdatedTime by viewModel.lastUpdated.collectAsState()
@@ -39,9 +43,24 @@ fun TemperatureScreen(viewModel: TemperatureViewModel = viewModel()) {
             .padding(top = 50.dp, bottom = 20.dp, start = 20.dp, end = 20.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
+
+        Text("Feels Like", style = MaterialTheme.typography.headlineSmall)
+        Spacer(modifier = Modifier.height(10.dp))
+        Text(
+            " $feelsLike°C",
+            style = MaterialTheme.typography.headlineLarge.copy(
+                fontWeight = FontWeight.Bold,
+                fontSize = 50.sp
+            )
+        )
+        Spacer(modifier = Modifier.height(30.dp))
         Text("Current Temperature", style = MaterialTheme.typography.headlineSmall)
         Spacer(modifier = Modifier.height(10.dp))
         Text(" $currentTemp°C", style = MaterialTheme.typography.headlineLarge)
+        Spacer(modifier = Modifier.height(20.dp))
+        Text("Current Humidity", style = MaterialTheme.typography.headlineSmall)
+        Spacer(modifier = Modifier.height(10.dp))
+        Text(" ${currentHumidity}°C", style = MaterialTheme.typography.headlineLarge)
         Spacer(modifier = Modifier.height(20.dp))
         Text("Set Temperature", style = MaterialTheme.typography.headlineSmall)
         Spacer(modifier = Modifier.height(10.dp))
