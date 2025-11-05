@@ -82,7 +82,7 @@ fun TemperatureScreen(viewModel: TemperatureViewModel = viewModel()) {
             value = setTemp.toFloat(),
             onValueChange = { viewModel.updateSetTemp(it.toInt()) },
             onValueChangeFinished = { viewModel.sentTemp() },
-            valueRange = 10f..40f,
+            valueRange = 15f..25f,
             steps = 30,
             modifier = Modifier.fillMaxWidth(), enabled = !isScanning
         )

@@ -1,6 +1,7 @@
 #include <BLEDevice.h>
 #include <Wire.h>
 #include <Adafruit_AHTX0.h>
+#include <Preferences.h>
 
 #define RELAY_PIN 3                                          // Relay connected to GPIO 3
 #define LED_PIN 8                                            // LED connected to GPIO 2
@@ -8,19 +9,17 @@
 #define UUID_PATTERN_ADVERT "00002222-0000-1000-8000-00805f9b3400"
 
 Adafruit_AHTX0 aht;
-int bleTemp = 20;
+
+int bleTemp = 18;
 float currentTemp = 0;      // Sensor temperature
 float currentHumidity = 0;  // Sensor humidity
-float feelsLike = 0;        // Feels like temperature
-bool overrideMode = false;  // Manual override flag
 
 int skipRelay = 0;
 
-bool isAdvertising = true;
+Preferences prefs;
 
 void handleAdvertisedDevice(BLEAdvertisedDevice advertisedDevice, BLEUUID expectedUUID) {
   // Check if the device has a service UUID
-
   if (advertisedDevice.getServiceDataUUID().equals(expectedUUID)) {
     // Get the service UUID from the advertised device
     Serial.print("Received expected service UUID: ");
@@ -61,10 +60,15 @@ void handleAdvertisedDevice(BLEAdvertisedDevice advertisedDevice, BLEUUID expect
           Serial.print("Parsed Temperature: ");
           Serial.println(temperature);
 
-          // Optionally, update the ViewModel or other components with the extracted temperature
           bleTemp = temperature;  // Store the temperature for further use
+
+          prefs.begin("settings", true);
+          //Update the ble temp in preference
+          prefs.putInt("setTemp", bleTemp);
+          prefs.end();
+
           blinkLED(LED_PIN, 5, 50);
-          skipRelay = 10;
+          skipRelay = 0;
         } else if (commandByte == 1) {
           // Handle command 1 (e.g., call send function)
           sendBLETemperature();
@@ -101,8 +105,8 @@ void sendBLETemperature() {
   tempBytes[0] = tempToSend >> 8;    // Most significant byte (MSB)
   tempBytes[1] = tempToSend & 0xFF;  // Least significant byte (LSB)
   tempBytes[2] = bleTemp;
-  tempBytes[3] = humidityToSend >> 8; //MSB
-  tempBytes[4] = humidityToSend & 0xFF; //LSB
+  tempBytes[3] = humidityToSend >> 8;    //MSB
+  tempBytes[4] = humidityToSend & 0xFF;  //LSB
 
   Serial.print("📡 Advertising Temp: ");
   Serial.print(tempToSend);
@@ -141,29 +145,14 @@ void stopAdvertising() {
   pAdvertising->stop();  // Stop current advertisements before changing
 }
 
-// Calculate "feels like" temperature (Heat Index) in Celsius
-float calculateFeelsLike(float temperatureC, float humidity) {
-  // Convert Celsius to Fahrenheit
-  float T = (temperatureC * 9.0 / 5.0) + 32.0;
-  float R = humidity;
-
-  // NOAA Heat Index formula (in Fahrenheit)
-  float HI = -42.379 + 2.04901523 * T + 10.14333127 * R + -0.22475541 * T * R + -0.00683783 * T * T + -0.05481717 * R * R + 0.00122874 * T * T * R + 0.00085282 * T * R * R + -0.00000199 * T * T * R * R;
-
-  // Adjustment for certain ranges (NOAA guidance)
-  if ((R < 13) && (T >= 80.0) && (T <= 112.0)) {
-    HI -= ((13 - R) / 4) * sqrt((17 - abs(T - 95.0)) / 17);
-  } else if ((R > 85) && (T >= 80.0) && (T <= 87.0)) {
-    HI += ((R - 85) / 10) * ((87 - T) / 5);
-  }
-
-  // Convert back to Celsius
-  return (HI - 32.0) * 5.0 / 9.0;
-}
-
 void setup() {
   Serial.begin(115200);
   Serial.println("Initializing...");
+
+  prefs.begin("settings", false);
+  // Get or set ble temp
+  bleTemp = prefs.getInt("setTemp", 18);
+  prefs.end();
 
   pinMode(RELAY_PIN, OUTPUT);
   digitalWrite(RELAY_PIN, LOW);  // Ensure relay is OFF initially
@@ -203,7 +192,6 @@ void loop() {
 
   currentTemp = temp.temperature;
   currentHumidity = humidity.relative_humidity;
-  float feelsLike = calculateFeelsLike(temp.temperature, humidity.relative_humidity);
   if (currentTemp < -40 || currentTemp > 100) {
     Serial.println("⚠️ Invalid temperature reading! Check sensor.");
     blinkLED(LED_PIN, 2, 1000);
@@ -211,41 +199,26 @@ void loop() {
   }
   if (skipRelay >= 10) {
     skipRelay = 0;
-    if (overrideMode) {
-      Serial.println("⚠️ Manual Override Active!");
-      digitalWrite(RELAY_PIN, bleTemp == 0 ? HIGH : LOW);
-      Serial.println(bleTemp == 0 ? "Relay ON (Override)" : "Relay OFF (Override)");
-      blinkLED(LED_PIN, 5, 50);
+
+    int current = (int)currentTemp;
+    //The logic behind this when temprature go down turn off relay and wiring
+    // will be NO so it will natually open, why becuase if the battery or relay or some issue with this, then heater will work
+    if (current <= bleTemp) {
+      digitalWrite(RELAY_PIN, LOW);
+      Serial.println("Relay OFF (AHT10 < BLE Temp)");
     } else {
-      int current = (int)currentTemp;
-      //The logic behind this when temprature go down turn off relay and wiring
-      // will be NO so it will natually open, why becuase if the battery or relay or some issue with this, then heater will work
-      if (current <= bleTemp) {
-        digitalWrite(RELAY_PIN, LOW);
-        Serial.println("Relay OFF (AHT10 < BLE Temp)");
-      } else {
-        digitalWrite(RELAY_PIN, HIGH);
-        Serial.println("Relay ON (AHT10 >= BLE Temp)");
-      }
-    }
-    if (isAdvertising) {
-      isAdvertising = !isAdvertising;
-      stopAdvertising();
-    } else {
-      isAdvertising = !isAdvertising;
-      sendBLETemperature();
+      digitalWrite(RELAY_PIN, HIGH);
+      Serial.println("Relay ON (AHT10 >= BLE Temp)");
     }
   }
   skipRelay += 1;
-  
 
   Serial.print("Sensor Temp: ");
   Serial.print(currentTemp);
-  Serial.print(" °C | Humidity: ");
+  Serial.print("°C | Set Temp: ");
+  Serial.print(bleTemp);
+  Serial.print("°C | Humidity: ");
   Serial.print(currentHumidity);
-  Serial.print(" % | Feels Like: ");
-  Serial.print(feelsLike);
-  Serial.print(" °C");
   Serial.print("| Skip:");
   Serial.println(skipRelay);
 }
